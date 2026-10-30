@@ -563,7 +563,7 @@ impl<P: SynergyPlugin> PluginComponent<P> {
             return TransportSnapshot::default();
         };
         let state_flags = context.state;
-        let has_flag = |flag: ProcessContext_::StatesAndFlags| state_flags & flag != 0;
+        let has_flag = |flag: ProcessContext_::StatesAndFlags| state_flags & (flag as uint32) != 0;
         TransportSnapshot {
             tempo_bpm: (has_flag(ProcessContext_::StatesAndFlags_::kTempoValid) && context.tempo > 0.0).then_some(context.tempo),
             project_quarter_notes: has_flag(ProcessContext_::StatesAndFlags_::kProjectTimeMusicValid).then_some(context.projectTimeMusic),
