@@ -1,0 +1,12 @@
+[package]
+name = "synergy-substrate"
+description = "The shared VST3 substrate under every slaw-vsts plugin: COM boilerplate, parameters, state, buses."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+vst3.workspace = true

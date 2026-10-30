@@ -1,0 +1,18 @@
+[package]
+name = "headcount"
+description = "Scales headcount up to 8 voices and lays them off on note-off."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+synergy-substrate.workspace = true
+
+[package.metadata.slaw-vsts]
+bundle-name = "Headcount"

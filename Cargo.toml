@@ -1,0 +1,32 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/synergy-substrate",
+    "plugins/kpi-compressor",
+    "plugins/stakeholder-chorus",
+    "plugins/headcount",
+    "plugins/executive-override",
+    "xtask",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["slopstack labs"]
+repository = "https://github.com/slopstack-labs/slaw-vsts"
+rust-version = "1.85"
+
+[workspace.dependencies]
+vst3 = "0.3.0"
+synergy-substrate = { path = "crates/synergy-substrate" }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+
+[profile.dev]
+# Plugins are loaded into other people's processes; an unwinding panic across the FFI
+# boundary is undefined behaviour, so abort even while developing.
+panic = "abort"
