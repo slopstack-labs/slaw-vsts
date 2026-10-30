@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>slaw-vsts — Beyond Deterministic Signal Processing</title>
+  <meta name="description" content="Four VST3 plugins for slaw (and every other host), written in Rust and governed like an enterprise: KPI Compressor, Stakeholder Chorus, Headcount and Executive Override.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23111'/%3E%3Cpath d='M5 22h4l3-12 4 14 3-9 2 5h6' fill='none' stroke='%2322d3ee' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <style>
+:root {
+  color-scheme: dark;
+  --bg: #06090b;
+  --surface: #0c1215;
+  --surface-2: #111a1e;
+  --border: rgba(255,255,255,0.08);
+  --text: #e9f1f3;
+  --text-muted: #8fa3a9;
+  --text-dim: #566a70;
+  --accent: #22d3ee;
+  --accent-dim: rgba(34,211,238,0.12);
+  --accent-2: #d946ef;
+  --font-sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, "JetBrains Mono", "Fira Code", monospace;
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    color-scheme: light;
+    --bg: #f7fbfc;
+    --surface: #eef4f6;
+    --surface-2: #e4edf0;
+    --border: rgba(10,30,40,0.12);
+    --text: #0d1a1e;
+    --text-muted: #48606a;
+    --text-dim: #6c838c;
+    --accent: #0e7490;
+    --accent-dim: rgba(14,116,144,0.1);
+    --accent-2: #a21caf;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--font-sans); line-height: 1.6; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+.wrap { max-width: 1040px; margin: 0 auto; padding: 0 16px; }
+nav { display: flex; justify-content: space-between; align-items: center; padding: 20px 0; }
+nav .brand { font-weight: 800; letter-spacing: -0.02em; font-size: 18px; color: var(--text); }
+nav .links a { margin-left: 20px; color: var(--text-muted); font-size: 14px; }
+.hero { padding: 72px 0 48px; }
+.eyebrow { font-family: var(--font-mono); font-size: 12px; color: var(--accent); letter-spacing: 0.12em; text-transform: uppercase; }
+h1 { font-size: clamp(36px, 7vw, 68px); line-height: 1.05; letter-spacing: -0.035em; margin: 14px 0 18px; }
+h1 em { font-style: normal; color: var(--accent); }
+.lede { font-size: 19px; color: var(--text-muted); max-width: 680px; }
+.quote { margin-top: 28px; padding-left: 16px; border-left: 2px solid var(--accent-2); color: var(--text-muted); font-style: italic; max-width: 620px; }
+.cta { margin-top: 32px; display: flex; gap: 12px; flex-wrap: wrap; }
+.button { display: inline-block; padding: 11px 18px; border-radius: 8px; font-weight: 600; font-size: 15px; border: 1px solid var(--border); color: var(--text); background: var(--surface); }
+.button.primary { background: var(--accent); border-color: var(--accent); color: var(--bg); }
+.button:hover { text-decoration: none; filter: brightness(1.08); }
+section { padding: 48px 0; border-top: 1px solid var(--border); }
+h2 { font-size: 28px; letter-spacing: -0.02em; margin: 0 0 8px; }
+.sub { color: var(--text-muted); margin: 0 0 28px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 16px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px; }
+.card .kind { font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.1em; }
+.card h3 { margin: 6px 0 6px; font-size: 19px; }
+.card .pitch { color: var(--accent); font-weight: 600; margin: 0 0 10px; }
+.card p { color: var(--text-muted); font-size: 14px; margin: 0; }
+pre { background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; padding: 16px; overflow-x: auto; font-family: var(--font-mono); font-size: 13px; color: var(--text); }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+th { color: var(--text-dim); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; }
+td code, li code, p code { font-family: var(--font-mono); font-size: 12.5px; background: var(--accent-dim); padding: 1px 5px; border-radius: 4px; }
+.ticker { font-family: var(--font-mono); font-size: 12px; color: var(--text-dim); white-space: nowrap; overflow: hidden; padding: 10px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+footer { padding: 40px 0 60px; color: var(--text-dim); font-size: 13px; border-top: 1px solid var(--border); }
+@media (max-width: 600px) {
+  nav .links a { margin-left: 12px; }
+  .table-scroll { overflow-x: auto; }
+}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <nav>
+      <a class="brand" href="#">slaw-vsts</a>
+      <div class="links">
+        <a href="#portfolio">Portfolio</a>
+        <a href="#install">Install</a>
+        <a href="https://github.com/slopstack-labs/slaw-vsts">GitHub</a>
+      </div>
+    </nav>
+
+    <header class="hero">
+      <div class="eyebrow">slopstack labs · VST3 · Rust</div>
+      <h1>Beyond deterministic<br><em>signal processing.</em></h1>
+      <p class="lede">Four VST3 plugins for <a href="https://github.com/slopstack-labs/slaw">slaw</a> and every other host, written in Rust and governed like an enterprise. Dynamics that hit their quarterly targets. A chorus with more stakeholders. A synth that manages its own headcount. A ducker that knows who has the floor.</p>
+      <p class="quote">"We didn't reinvent the plugin. We asked a plugin to attend more meetings."<br>— slaw-vsts Engineering Blog, Issue 1 (Final)</p>
+      <div class="cta">
+        <a class="button primary" href="https://github.com/slopstack-labs/slaw-vsts/releases">Download the bundles</a>
+        <a class="button" href="https://github.com/slopstack-labs/slaw-vsts">Read the source</a>
+      </div>
+    </header>
+  </div>
+
+  <div class="ticker"><div class="wrap">KPI COMPRESSOR −13.5 dB ▼ · STAKEHOLDER CHORUS L/R CORRELATION 0.51 ▼ · HEADCOUNT 8/8 VOICES EMPLOYED ▲ · EXECUTIVE OVERRIDE −10 dB ON EVERY QUARTER NOTE ▼ · DENORMALS 0 · NaNs 0 · STAKEHOLDERS LISTENED TO 0</div></div>
+
+  <div class="wrap">
+    <section id="portfolio">
+      <h2>The portfolio</h2>
+      <p class="sub">Each one is real DSP behind a straight face.</p>
+      <div class="grid">
+        <article class="card">
+          <div class="kind">effect · dynamics</div>
+          <h3>KPI Compressor</h3>
+          <p class="pitch">Compresses your dynamic range to meet quarterly targets.</p>
+          <p>Feed-forward, stereo-linked peak compressor: threshold, ratio, soft knee, attack, release, makeup, parallel mix, and a gain-reduction meter for the board.</p>
+        </article>
+        <article class="card">
+          <div class="kind">effect · modulation</div>
+          <h3>Stakeholder Chorus</h3>
+          <p class="pitch">More voices in the room, none of them listening.</p>
+          <p>Up to four modulated delay taps, each heard at a different phase on the left and the right. Mono goes in, a wider consensus comes out.</p>
+        </article>
+        <article class="card">
+          <div class="kind">instrument · synth</div>
+          <h3>Headcount</h3>
+          <p class="pitch">Scales headcount up to 8 voices and lays them off on note-off.</p>
+          <p>Two band-limited oscillators, a resonant zero-delay-feedback lowpass with an envelope sweep, ADSR, velocity, and oldest-first voice stealing during a hiring freeze.</p>
+        </article>
+        <article class="card">
+          <div class="kind">effect · dynamics · sidechain</div>
+          <h3>Executive Override</h3>
+          <p class="pitch">When the kick speaks, everyone else stops talking.</p>
+          <p>Ducks on a stereo sidechain bus, on the host's tempo (1/4, 1/8, 1/2, a bar), or on MIDI notes. Depth, attack, hold, release, curve, sidechain highpass, mix.</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="install">
+      <h2>Install</h2>
+      <p class="sub">Unzip the bundles into your VST3 folder, or build them yourself.</p>
+      <div class="table-scroll">
+        <table>
+          <tr><th>OS</th><th>Folder</th></tr>
+          <tr><td>Linux</td><td><code>~/.vst3</code></td></tr>
+          <tr><td>Windows</td><td><code>C:\Program Files\Common Files\VST3</code></td></tr>
+          <tr><td>macOS</td><td><code>~/Library/Audio/Plug-Ins/VST3</code></td></tr>
+        </table>
+      </div>
+      <pre>git clone https://github.com/slopstack-labs/slaw-vsts
+cd slaw-vsts
+cargo test --workspace
+cargo xtask bundle --release        # → target/bundles/*.vst3
+slaw studio --plugin-folder target/bundles</pre>
+      <p class="sub">In slaw: <code>Settings → Plugins → Add folder…</code>, or <code>--plugin-folder</code>, or <code>VST3_PATH</code>. Agents find them with the MCP <code>list_plugins</code> tool.</p>
+    </section>
+
+    <section>
+      <h2>Governance</h2>
+      <p class="sub">Unlike slaw, these plugins are fully deterministic. Legal insisted.</p>
+      <div class="grid">
+        <div class="card"><h3>MIT all the way down</h3><p>VST3 through the MIT <code>vst3</code> crate. No GPL framework holding your source code hostage.</p></div>
+        <div class="card"><h3>Zero-trust DSP</h3><p>All <code>unsafe</code> lives in one substrate at the VST3 boundary. The plugins are pure functions of slices.</p></div>
+        <div class="card"><h3>Real-time conduct</h3><p><code>process()</code> never allocates, locks, prints or blocks. Tests prove no NaNs, no denormals, and that each plugin does what its pitch says.</p></div>
+      </div>
+    </section>
+  </div>
+
+  <footer>
+    <div class="wrap">slaw-vsts · <a href="https://github.com/slopstack-labs">slopstack labs</a> · MIT · VST is a registered trademark of Steinberg Media Technologies GmbH, who were not consulted.</div>
+  </footer>
+</body>
+</html>

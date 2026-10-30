@@ -1,0 +1,84 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (e.g. v0.1.0-aux-alignment)'
+        required: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  bundle:
+    name: Bundle ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux-x86_64
+          - os: windows-latest
+            platform: windows-x86_64
+          - os: macos-latest
+            platform: macos-arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Test
+        run: cargo test --workspace
+
+      - name: Bundle
+        run: cargo xtask bundle --release
+
+      - name: Zip
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import shutil
+          shutil.make_archive("slaw-vsts-${{ matrix.platform }}", "zip", "target/bundles")
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: slaw-vsts-${{ matrix.platform }}
+          path: slaw-vsts-${{ matrix.platform }}.zip
+
+  release:
+    name: Create Release
+    needs: bundle
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Tag commit
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          gh api repos/${{ github.repository }}/git/refs \
+            -f ref="refs/tags/${{ github.event.inputs.version }}" \
+            -f sha="${{ github.sha }}"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.version || github.ref_name }}
+          name: slaw-vsts ${{ github.event.inputs.version || github.ref_name }}
+          body: |
+            Four VST3 stakeholders, bundled for Linux, Windows and macOS.
+            Unzip into your VST3 folder (or point slaw's Settings → Plugins at it) and rescan.
+          files: artifacts/*.zip
