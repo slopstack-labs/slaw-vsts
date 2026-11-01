@@ -4,7 +4,7 @@
 > "We didn't reinvent the plugin. We asked a plugin to attend more meetings."
 > — slaw-vsts Engineering Blog, Issue 1 (Final)
 
-**slaw-vsts** is the official third-party first-party plugin portfolio for [slaw](https://github.com/slopstack-labs/slaw), the AI-native DAW. Four VST3 plugins, written in Rust, that bring enterprise governance to your signal chain: dynamics that hit their quarterly targets, a chorus that adds stakeholders, a synth that manages its own headcount, and a sidechain ducker that knows who has the floor.
+**slaw-vsts** is the official third-party first-party plugin portfolio for [slaw](https://github.com/slopstack-labs/slaw), the AI-native DAW. Six VST3 plugins, written in Rust, that bring enterprise governance to your signal chain: dynamics that hit their quarterly targets, a chorus that adds stakeholders, a synth that manages its own headcount, a sidechain ducker that knows who has the floor, a guitar amp that escalates everything, and a bass amp that protects the bottom line.
 
 Unlike slaw itself, these plugins are **fully deterministic**. Legal insisted. Every sample out is a pure function of the samples in, the knobs, and the host's tempo. We are as surprised as you are.
 
@@ -35,6 +35,9 @@ See the [Contributor Excellence Framework](CONTRIBUTING.md).
 | **Stakeholder Chorus** | effect · `Fx\|Modulation` | More voices in the room, none of them listening. Up to four modulated delay taps, each heard at a different phase left and right, so mono leaves wider than it came in. | p0 Rate (Hz) · p1 Depth (ms) · p2 Stakeholders (1–4 voices) · p3 Width (%) · p4 Feedback (%) · p5 Mix (%) |
 | **Headcount** | instrument · `Instrument\|Synth` | Scales headcount up to 8 voices and lays them off on note-off. Polyphonic subtractive synth: two PolyBLEP oscillators, a resonant zero-delay-feedback lowpass with an envelope sweep, ADSR, velocity, oldest-first voice stealing. | p0 Osc 1 Wave (Saw/Square) · p1 Osc 2 Wave · p2 Osc 2 Detune (ct) · p3 Osc 2 Octave (−2…+2) · p4 Osc Mix (%) · p5 Cutoff (Hz) · p6 Resonance (%) · p7 Filter Envelope (%) · p8 Attack · p9 Decay · p10 Sustain · p11 Release · p12 Headcount (1–8 voices) · p13 Volume (dB) · p14 Voices Employed (read-only meter) |
 | **Executive Override** | effect · `Fx\|Dynamics` | When the kick speaks, everyone else stops talking. A ducker keyed by a sidechain, by the host's tempo, or by MIDI notes. | p0 Mode (Sidechain/Tempo pump/MIDI trigger) · p1 Threshold (dB) · p2 Depth (dB) · p3 Attack (ms) · p4 Release (ms) · p5 Hold (ms) · p6 Curve (%) · p7 Rate (1/4, 1/8, 1/2, 1 bar) · p8 Sidechain HPF (Hz) · p9 Mix (%) · p10 Gain Reduction (dB, read-only meter) |
+
+| **Escalation Stack** | effect · `Fx\|Distortion` | Takes a clean idea and escalates it to leadership at high gain. A whole guitar amp in one slot: tight control, one or two asymmetric preamp stages at 4x oversampling, tone stack with presence, a power amp that compresses as it is pushed, and a speaker cabinet, so the output is a finished tone without an impulse loader. | p0 Voicing (Clean/Crunch/High Gain) · p1 Gain (0–10) · p2 Tight (Hz) · p3 Bass (dB) · p4 Middle (dB) · p5 Treble (dB) · p6 Presence (dB) · p7 Master (0–10) · p8 Cabinet (4x12 Closed/2x12 Open/1x12 Combo/Direct) · p9 Output (dB) |
+| **Bottom Line** | effect · `Fx\|Distortion` | Keeps the low end on budget while the rest of the bass gets escalated. A bass amp: a Linkwitz–Riley crossover keeps everything below it clean, the mids and highs go through an asymmetric drive at 4x oversampling, Blend sets how much of the driven band you hear, then a four-band EQ and a bass cabinet. | p0 Drive (0–10) · p1 Blend (%) · p2 Crossover (Hz) · p3 Bass (dB) · p4 Low Mid (dB) · p5 High Mid (dB) · p6 Treble (dB) · p7 Cabinet (8x10/4x10/1x15/Direct) · p8 Output (dB) |
 
 Parameter ids are forever: projects and automation refer to them, so new parameters get new ids.
 
@@ -104,11 +107,13 @@ cargo xtask bundle --release --target x86_64-pc-windows-gnu
 ## Layout
 
 ```
-crates/synergy-substrate/   the VST3 layer: factory, single-component processor+controller, buses, state, shared DSP
+crates/synergy-substrate/   the VST3 layer: factory, single-component processor+controller, buses, state, shared DSP (filters, biquads, 4x oversampling)
 plugins/kpi-compressor/     KPI Compressor
 plugins/stakeholder-chorus/ Stakeholder Chorus
 plugins/headcount/          Headcount
 plugins/executive-override/ Executive Override
+plugins/escalation-stack/   Escalation Stack
+plugins/bottom-line/        Bottom Line
 xtask/                      `cargo xtask bundle`
 docs/                       the landing page
 ```
@@ -128,6 +133,8 @@ Measured in slaw's own VST3 host (headless `slaw mcp`, 44.1 kHz, 120 BPM) with t
 | Stakeholder Chorus | Mix automated 0 → 100 % as `fx.1.p5` | L/R correlation 0.94 in bar 1 → 0.37 in bar 4 |
 | Executive Override | Tempo pump, Depth 12 dB, 1/4 | −9.2 to −10.4 dB, 20 ms after every quarter note; 0.0 dB by ¾ of the beat |
 | Executive Override | Sidechain mode, slaw leaves the aux bus inactive | output bit-identical to bypass |
+| Escalation Stack | `list_plugins`, then slaw's plucked-string `guitar` through it on three tracks of a 137-bar rock song | listed with vendor *slopstack labs*, role distortion, 10 parameters with units; renders with no stray stdout; rhythm guitars −24 dBFS RMS, peak −10 dBFS |
+| Bottom Line | `list_plugins`, then slaw's `bassguitar` through it in an 8-bar band render | listed with vendor *slopstack labs*, role distortion, 9 parameters with units; bass −16.8 dBFS RMS, no stray stdout |
 
 *Stakeholders consulted: 4. Stakeholders listened to: 0.*
 

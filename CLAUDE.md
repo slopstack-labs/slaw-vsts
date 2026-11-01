@@ -27,7 +27,7 @@ Drive it over stdio JSON-RPC: `list_plugins` (vendor "slopstack labs", correct i
 |------|------|
 | `crates/synergy-substrate/src/component.rs` | the single COM object: IComponent + IAudioProcessor + IEditController + IProcessContextRequirements. All host pointers are handled here |
 | `crates/synergy-substrate/src/factory.rs` | IPluginFactory 1/2/3 (vendor, sub-categories) |
-| `crates/synergy-substrate/src/{parameters,state,dsp}.rs` | parameter tapers/formatting, the state chunk, shared DSP (ZDF filter, PolyBLEP, dB helpers) |
+| `crates/synergy-substrate/src/{parameters,state,dsp}.rs` | parameter tapers/formatting, the state chunk, shared DSP (ZDF filter, PolyBLEP, dB helpers, RBJ biquads, the 4x oversampler) |
 | `crates/synergy-substrate/tests/com_contract.rs` | drives a plugin through the real COM interfaces like a host |
 | `plugins/<crate>/src/lib.rs` | one `SynergyPlugin` + `export_synergy_plugin!` + its DSP tests |
 | `xtask/` | `cargo xtask bundle` |

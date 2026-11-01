@@ -6,6 +6,8 @@ members = [
     "plugins/stakeholder-chorus",
     "plugins/headcount",
     "plugins/executive-override",
+    "plugins/escalation-stack",
+    "plugins/bottom-line",
     "xtask",
 ]
 
