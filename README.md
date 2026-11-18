@@ -4,7 +4,7 @@
 > "We didn't reinvent the plugin. We asked a plugin to attend more meetings."
 > — slaw-vsts Engineering Blog, Issue 1 (Final)
 
-**slaw-vsts** is the official third-party first-party plugin portfolio for [slaw](https://github.com/slopstack-labs/slaw), the AI-native DAW. Six VST3 plugins, written in Rust, that bring enterprise governance to your signal chain: dynamics that hit their quarterly targets, a chorus that adds stakeholders, a synth that manages its own headcount, a sidechain ducker that knows who has the floor, a guitar amp that escalates everything, and a bass amp that protects the bottom line.
+**slaw-vsts** is the official third-party first-party plugin portfolio for [slaw](https://github.com/slopstack-labs/slaw), the AI-native DAW. Seven VST3 plugins, written in Rust, that bring enterprise governance to your signal chain: dynamics that hit their quarterly targets, a chorus that adds stakeholders, a synth that manages its own headcount, a sidechain ducker that knows who has the floor, a guitar amp that escalates everything, a bass amp that protects the bottom line, and a tempo-synced delay that circles back on every 1/8 note.
 
 Unlike slaw itself, these plugins are **fully deterministic**. Legal insisted. Every sample out is a pure function of the samples in, the knobs, and the host's tempo. We are as surprised as you are.
 
@@ -38,6 +38,7 @@ See the [Contributor Excellence Framework](CONTRIBUTING.md).
 
 | **Escalation Stack** | effect · `Fx\|Distortion` | Takes a clean idea and escalates it to leadership at high gain. A whole guitar amp in one slot: tight control, one or two asymmetric preamp stages at 4x oversampling, tone stack with presence, a power amp that compresses as it is pushed, and a speaker cabinet, so the output is a finished tone without an impulse loader. | p0 Voicing (Clean/Crunch/High Gain) · p1 Gain (0–10) · p2 Tight (Hz) · p3 Bass (dB) · p4 Middle (dB) · p5 Treble (dB) · p6 Presence (dB) · p7 Master (0–10) · p8 Cabinet (4x12 Closed/2x12 Open/1x12 Combo/Direct) · p9 Output (dB) |
 | **Bottom Line** | effect · `Fx\|Distortion` | Keeps the low end on budget while the rest of the bass gets escalated. A bass amp: a Linkwitz–Riley crossover keeps everything below it clean, the mids and highs go through an asymmetric drive at 4x oversampling, Blend sets how much of the driven band you hear, then a four-band EQ and a bass cabinet. | p0 Drive (0–10) · p1 Blend (%) · p2 Crossover (Hz) · p3 Bass (dB) · p4 Low Mid (dB) · p5 High Mid (dB) · p6 Treble (dB) · p7 Cabinet (8x10/4x10/1x15/Direct) · p8 Output (dB) |
+| **Follow-Up Cadence** | effect · `Fx\|Delay` | Circles back on every 1/8 note. A stereo delay synced to the host's tempo (120 BPM when it does not say) or free-running, with ping-pong, low and high cuts inside the feedback loop so every repeat is thinner and darker, and ducking that pushes the repeats back while the input talks. Time changes crossfade between read heads, so automation never clicks. | p0 Sync (Free/Tempo) · p1 Time (ms, 1–2000, Free mode) · p2 Division (1/16, 1/8 triplet, 1/8, 1/8 dotted, 1/4 triplet, 1/4, 1/4 dotted, 1/2, 1 bar; Tempo mode) · p3 Feedback (%, 0–90) · p4 Ping-Pong (%) · p5 Low Cut (Hz, 20 = off) · p6 High Cut (Hz, 20000 = off) · p7 Ducking (dB) · p8 Mix (%) |
 
 Parameter ids are forever: projects and automation refer to them, so new parameters get new ids.
 
@@ -114,6 +115,7 @@ plugins/headcount/          Headcount
 plugins/executive-override/ Executive Override
 plugins/escalation-stack/   Escalation Stack
 plugins/bottom-line/        Bottom Line
+plugins/follow-up-cadence/  Follow-Up Cadence
 xtask/                      `cargo xtask bundle`
 docs/                       the landing page
 ```
