@@ -118,7 +118,7 @@ cargo xtask bundle --release --target x86_64-pc-windows-gnu
 ## Layout
 
 ```
-crates/synergy-substrate/   the VST3 layer: factory, single-component processor+controller, buses, MIDI controller mapping, state, shared DSP (filters, biquads, 4x oversampling)
+crates/synergy-substrate/   the VST3 layer: factory, single-component processor+controller, buses, MIDI controller mapping, state, sample-accurate-ish automation, shared DSP (filters, biquads, 4x oversampling)
 plugins/kpi-compressor/     KPI Compressor
 plugins/stakeholder-chorus/ Stakeholder Chorus
 plugins/headcount/          Headcount
@@ -131,6 +131,17 @@ docs/                       the landing page
 ```
 
 A plugin is one `SynergyPlugin` implementation: a `PluginDescription` (name, class id, kind, sub-categories, parameters, buses, MIDI controller routes) and a `process` function over plain slices. The substrate turns it into a VST3 class with `export_synergy_plugin!(YourPlugin)`.
+
+### Automation
+
+Hosts send automation as ramps: a queue of points per parameter per block, with values moving linearly between them. slaw's 64-frame blocks hide the difference; Ableton, Reaper and friends send 256–2048 frames, where one value per block would step and zipper. So the substrate decides, once per host block, how to convene the plugin:
+
+| Host block | Plugin calls |
+|------------|--------------|
+| no automation | one, for the whole block, as before |
+| automation on any parameter | one per sub-block of at most 32 frames, split exactly on an automation point when neither side would be shorter than 8 frames |
+
+Each sub-block gets the parameter values at its first frame (interpolated per VST3: linear between points, ramping from the previous value before the first point), its own note events with offsets relative to it, and a transport advanced to where it starts (`project_quarter_notes` moves at the host's tempo; crossing a bar line moves `bar_start_quarter_notes` to the new bar using the time signature). Meters report once per host block, keeping the reading with the largest magnitude, so *Gain Reduction* is still the deepest duck and *Voices Employed* the peak headcount. Up to 64 points per parameter per block are kept in memory allocated up front; a host that sends more is thinned evenly, keeping the first and last. What the controller reports back is each queue's last point. Plugins never notice: `ProcessBlock` and `SynergyPlugin` are unchanged.
 
 ## Track record
 

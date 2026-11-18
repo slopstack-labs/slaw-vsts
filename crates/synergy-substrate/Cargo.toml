@@ -10,3 +10,8 @@ rust-version.workspace = true
 
 [dependencies]
 vst3.workspace = true
+
+[dev-dependencies]
+# The contract tests drive one real plugin through the substrate, to prove that splitting a long
+# automated block keeps its tempo pump and MIDI trigger where short host blocks put them.
+executive-override = { path = "../../plugins/executive-override" }

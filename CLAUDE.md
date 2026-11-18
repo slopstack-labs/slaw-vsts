@@ -29,6 +29,7 @@ Drive it over stdio JSON-RPC: `list_plugins` (vendor "slopstack labs", correct i
 | `crates/synergy-substrate/src/factory.rs` | IPluginFactory 1/2/3 (vendor, sub-categories) |
 | `crates/synergy-substrate/src/{parameters,state,dsp}.rs` | parameter tapers/formatting, the state chunk, shared DSP (ZDF filter, PolyBLEP, dB helpers, RBJ biquads, the 4x oversampler) |
 | `crates/synergy-substrate/src/midi.rs` | `MidiController` / `MidiControllerAssignment`: the plugin-facing names for VST3 controller numbers (pitch bend, mod wheel, aftertouch, CCs) |
+| `crates/synergy-substrate/src/automation.rs` | sample-accurate-ish automation: splits automated host blocks into ≤32-frame sub-blocks with interpolated parameters, rebased events, advanced transport and combined meters (largest magnitude wins). Plain Rust, no host pointers |
 | `crates/synergy-substrate/tests/com_contract.rs` | drives a plugin through the real COM interfaces like a host |
 | `plugins/<crate>/src/lib.rs` | one `SynergyPlugin` + `export_synergy_plugin!` + its DSP tests |
 | `xtask/` | `cargo xtask bundle` |
