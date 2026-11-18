@@ -54,6 +54,7 @@ dependencies = [
 name = "synergy-substrate"
 version = "0.1.0"
 dependencies = [
+ "executive-override",
  "vst3",
 ]
 

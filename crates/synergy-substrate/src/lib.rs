@@ -4,12 +4,14 @@
 //! describes itself (name, class id, buses, parameters) and implements
 //! [`SynergyPlugin`] for its DSP; the substrate does the rest: the factory, a
 //! single-component processor + edit controller, bus negotiation, parameter
-//! automation in and meters out, note events, host tempo and position, and a
+//! automation in (split into short sub-blocks so ramps arrive sample-accurate-ish,
+//! see [`automation`]) and meters out, note events, host tempo and position, and a
 //! state chunk so hosts can save and restore every knob.
 //!
 //! Plugins never see a raw pointer. All `unsafe` lives in [`component`] and
 //! [`factory`], next to the comments that justify it.
 
+pub mod automation;
 pub mod component;
 pub mod dsp;
 pub mod factory;
@@ -91,6 +93,11 @@ pub struct TransportSnapshot {
 }
 
 /// One block of work handed to [`SynergyPlugin::process`].
+///
+/// A host block without automation arrives as one `ProcessBlock`. While automation moves, the
+/// substrate hands it over as consecutive sub-blocks of at most
+/// [`automation::AUTOMATION_SUB_BLOCK_FRAMES`] frames, each with the parameter values at its first
+/// frame, its own events (offsets relative to it) and its own transport, so plugins need not care.
 pub struct ProcessBlock<'a> {
     pub sample_rate: f32,
     /// Main input (effects). Silence for instruments.
@@ -102,7 +109,8 @@ pub struct ProcessBlock<'a> {
     pub output_right: &'a mut [f32],
     /// Plain parameter values, indexed like [`PluginDescription::parameters`].
     pub parameters: &'a [f32],
-    /// Where read-only parameters (meters) report their plain value, same indexing.
+    /// Where read-only parameters (meters) report their plain value, same indexing. Across the
+    /// sub-blocks of one host block, the reading with the largest magnitude is what the host sees.
     pub meters: &'a mut [Option<f32>],
     pub events: &'a [NoteEvent],
     pub transport: TransportSnapshot,
