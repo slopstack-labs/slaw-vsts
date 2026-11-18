@@ -1,6 +1,7 @@
 //! The state chunk hosts save with a project: a magic tag, a format version,
 //! then every non-meter parameter as (id, normalized value). Unknown ids are
-//! skipped on load, so adding parameters never breaks old projects.
+//! skipped on load and ids a chunk does not mention keep their defaults, so
+//! adding parameters never breaks old projects (no format bump needed).
 
 use crate::ParameterSpecification;
 
@@ -73,5 +74,33 @@ mod tests {
         let mut encoded_state = encode_state(PARAMETERS, &[0.25, 0.9, 0.75]);
         encoded_state.truncate(encoded_state.len() - 5);
         assert_eq!(decode_state(&encoded_state), Some(vec![(0, 0.25)]));
+    }
+
+    #[test]
+    fn a_chunk_from_before_new_parameters_existed_loads_what_it_has() {
+        // A version-1 chunk written by hand, byte for byte, the way a project saved
+        // before ids 3+ existed holds it: two parameters, ids 0 and 1.
+        let mut legacy_chunk = Vec::new();
+        legacy_chunk.extend_from_slice(b"SYNERGY1");
+        legacy_chunk.extend_from_slice(&1u32.to_le_bytes());
+        legacy_chunk.extend_from_slice(&2u32.to_le_bytes());
+        for (identifier, normalized_value) in [(0u32, 0.125f64), (1, 0.875)] {
+            legacy_chunk.extend_from_slice(&identifier.to_le_bytes());
+            legacy_chunk.extend_from_slice(&normalized_value.to_le_bytes());
+        }
+        // Today's parameter list has more ids than the chunk; the chunk still decodes to exactly
+        // what it saved, so the component restores those and leaves every newer id at its default.
+        let decoded_values = decode_state(&legacy_chunk).expect("an older chunk is still ours");
+        assert_eq!(decoded_values, vec![(0, 0.125), (1, 0.875)]);
+        assert!(decoded_values.iter().all(|(identifier, _)| *identifier != 3));
+        // And today's encoder still writes the same format, so the old reader is the current reader.
+        let current_chunk = encode_state(
+            &[
+                ParameterSpecification::linear(0, "A", "", 0.0, 1.0, 0.0),
+                ParameterSpecification::linear(1, "B", "", 0.0, 1.0, 0.0),
+            ],
+            &[0.125, 0.875],
+        );
+        assert_eq!(current_chunk, legacy_chunk);
     }
 }

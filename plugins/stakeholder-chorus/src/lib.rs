@@ -34,6 +34,7 @@ static DESCRIPTION: PluginDescription = PluginDescription {
     sidechain_input: false,
     note_input: false,
     tail_seconds: 0.1,
+    midi_controller_assignments: &[],
 };
 
 const MAXIMUM_STAKEHOLDERS: usize = 4;

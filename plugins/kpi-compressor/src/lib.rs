@@ -38,6 +38,7 @@ static DESCRIPTION: PluginDescription = PluginDescription {
     sidechain_input: false,
     note_input: false,
     tail_seconds: 0.0,
+    midi_controller_assignments: &[],
 };
 
 /// Static gain computer: how many dB a signal at `level_decibels` is turned down.

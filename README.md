@@ -33,13 +33,24 @@ See the [Contributor Excellence Framework](CONTRIBUTING.md).
 |--------|------|-------|-----------------------------|
 | **KPI Compressor** | effect · `Fx\|Dynamics` | Compresses your dynamic range to meet quarterly targets. Feed-forward, stereo-linked peak compressor with a soft knee and a parallel mix. | p0 Threshold (dB) · p1 Ratio (:1) · p2 Knee (dB) · p3 Attack (ms) · p4 Release (ms) · p5 Makeup (dB) · p6 Mix (%) · p7 Gain Reduction (dB, read-only meter) |
 | **Stakeholder Chorus** | effect · `Fx\|Modulation` | More voices in the room, none of them listening. Up to four modulated delay taps, each heard at a different phase left and right, so mono leaves wider than it came in. | p0 Rate (Hz) · p1 Depth (ms) · p2 Stakeholders (1–4 voices) · p3 Width (%) · p4 Feedback (%) · p5 Mix (%) |
-| **Headcount** | instrument · `Instrument\|Synth` | Scales headcount up to 8 voices and lays them off on note-off. Polyphonic subtractive synth: two PolyBLEP oscillators, a resonant zero-delay-feedback lowpass with an envelope sweep, ADSR, velocity, oldest-first voice stealing. | p0 Osc 1 Wave (Saw/Square) · p1 Osc 2 Wave · p2 Osc 2 Detune (ct) · p3 Osc 2 Octave (−2…+2) · p4 Osc Mix (%) · p5 Cutoff (Hz) · p6 Resonance (%) · p7 Filter Envelope (%) · p8 Attack · p9 Decay · p10 Sustain · p11 Release · p12 Headcount (1–8 voices) · p13 Volume (dB) · p14 Voices Employed (read-only meter) |
+| **Headcount** | instrument · `Instrument\|Synth` | Scales headcount up to 8 voices and lays them off on note-off. Polyphonic subtractive synth: two PolyBLEP oscillators, a resonant zero-delay-feedback lowpass with an envelope sweep, ADSR, velocity, oldest-first voice stealing, pitch bend and mod-wheel vibrato. | p0 Osc 1 Wave (Saw/Square) · p1 Osc 2 Wave · p2 Osc 2 Detune (ct) · p3 Osc 2 Octave (−2…+2) · p4 Osc Mix (%) · p5 Cutoff (Hz) · p6 Resonance (%) · p7 Filter Envelope (%) · p8 Attack · p9 Decay · p10 Sustain · p11 Release · p12 Headcount (1–8 voices) · p13 Volume (dB) · p14 Voices Employed (read-only meter) · p15 Pitch Bend (%, −100…+100, centre 0; MIDI pitch bend) · p16 Mod Wheel (%; MIDI CC 1) · p17 Bend Range (st, 0–24, default 2) · p18 Vibrato Depth (ct, 0–100, default 30) |
 | **Executive Override** | effect · `Fx\|Dynamics` | When the kick speaks, everyone else stops talking. A ducker keyed by a sidechain, by the host's tempo, or by MIDI notes. | p0 Mode (Sidechain/Tempo pump/MIDI trigger) · p1 Threshold (dB) · p2 Depth (dB) · p3 Attack (ms) · p4 Release (ms) · p5 Hold (ms) · p6 Curve (%) · p7 Rate (1/4, 1/8, 1/2, 1 bar) · p8 Sidechain HPF (Hz) · p9 Mix (%) · p10 Gain Reduction (dB, read-only meter) |
 
 | **Escalation Stack** | effect · `Fx\|Distortion` | Takes a clean idea and escalates it to leadership at high gain. A whole guitar amp in one slot: tight control, one or two asymmetric preamp stages at 4x oversampling, tone stack with presence, a power amp that compresses as it is pushed, and a speaker cabinet, so the output is a finished tone without an impulse loader. | p0 Voicing (Clean/Crunch/High Gain) · p1 Gain (0–10) · p2 Tight (Hz) · p3 Bass (dB) · p4 Middle (dB) · p5 Treble (dB) · p6 Presence (dB) · p7 Master (0–10) · p8 Cabinet (4x12 Closed/2x12 Open/1x12 Combo/Direct) · p9 Output (dB) |
 | **Bottom Line** | effect · `Fx\|Distortion` | Keeps the low end on budget while the rest of the bass gets escalated. A bass amp: a Linkwitz–Riley crossover keeps everything below it clean, the mids and highs go through an asymmetric drive at 4x oversampling, Blend sets how much of the driven band you hear, then a four-band EQ and a bass cabinet. | p0 Drive (0–10) · p1 Blend (%) · p2 Crossover (Hz) · p3 Bass (dB) · p4 Low Mid (dB) · p5 High Mid (dB) · p6 Treble (dB) · p7 Cabinet (8x10/4x10/1x15/Direct) · p8 Output (dB) |
 
 Parameter ids are forever: projects and automation refer to them, so new parameters get new ids.
+
+### MIDI controllers
+
+VST3 does not deliver pitch bend or CCs as events: the host asks the plugin (`IMidiMapping`) which parameter each controller drives, then sends the controller as an ordinary parameter change. A plugin declares its routes in `PluginDescription::midi_controller_assignments`; they apply on event bus 0, on every MIDI channel. Everything not listed here is unmapped.
+
+| Plugin | MIDI controller | Parameter | What it does |
+|--------|-----------------|-----------|--------------|
+| **Headcount** | Pitch bend | p15 Pitch Bend | Bends both oscillators of every voice by up to ±*Bend Range* (p17) semitones, smoothed over ~8 ms so a stepped host bend glides |
+| **Headcount** | CC 1 (mod wheel) | p16 Mod Wheel | Scales a 5.5 Hz vibrato on every voice from none up to ±*Vibrato Depth* (p18) cents |
+
+The mapped parameters are ordinary automatable knobs, so hosts without MIDI mapping (and agents writing automation lanes) can still bend. Saved projects from before the wheels existed load unchanged: the new ids keep their defaults (bend centred, no vibrato).
 
 ### Executive Override: the sidechain contract
 
@@ -107,7 +118,7 @@ cargo xtask bundle --release --target x86_64-pc-windows-gnu
 ## Layout
 
 ```
-crates/synergy-substrate/   the VST3 layer: factory, single-component processor+controller, buses, state, shared DSP (filters, biquads, 4x oversampling)
+crates/synergy-substrate/   the VST3 layer: factory, single-component processor+controller, buses, MIDI controller mapping, state, shared DSP (filters, biquads, 4x oversampling)
 plugins/kpi-compressor/     KPI Compressor
 plugins/stakeholder-chorus/ Stakeholder Chorus
 plugins/headcount/          Headcount
@@ -118,7 +129,7 @@ xtask/                      `cargo xtask bundle`
 docs/                       the landing page
 ```
 
-A plugin is one `SynergyPlugin` implementation: a `PluginDescription` (name, class id, kind, sub-categories, parameters, buses) and a `process` function over plain slices. The substrate turns it into a VST3 class with `export_synergy_plugin!(YourPlugin)`.
+A plugin is one `SynergyPlugin` implementation: a `PluginDescription` (name, class id, kind, sub-categories, parameters, buses, MIDI controller routes) and a `process` function over plain slices. The substrate turns it into a VST3 class with `export_synergy_plugin!(YourPlugin)`.
 
 ## Track record
 

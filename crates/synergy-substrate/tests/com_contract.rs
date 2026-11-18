@@ -9,7 +9,7 @@ use synergy_substrate::factory::create_factory;
 use synergy_substrate::vst3::Steinberg::Vst::*;
 use synergy_substrate::vst3::Steinberg::*;
 use synergy_substrate::vst3::{Class, ComPtr, ComWrapper, Interface};
-use synergy_substrate::{ParameterSpecification, PluginDescription, PluginKind, ProcessBlock, SynergyPlugin};
+use synergy_substrate::{MidiController, MidiControllerAssignment, ParameterSpecification, PluginDescription, PluginKind, ProcessBlock, SynergyPlugin};
 
 static PARAMETERS: [ParameterSpecification; 2] = [
     ParameterSpecification::linear(5, "Gain", "x", 0.0, 2.0, 1.0),
@@ -26,6 +26,7 @@ static DESCRIPTION: PluginDescription = PluginDescription {
     sidechain_input: true,
     note_input: false,
     tail_seconds: 0.0,
+    midi_controller_assignments: &[],
 };
 
 /// Multiplies the main input by Gain, adds the sidechain, meters the peak.
@@ -49,6 +50,55 @@ impl SynergyPlugin for ContractGain {
             peak = peak.max(block.output_left[frame_index].abs());
         }
         block.meters[1] = Some(peak);
+    }
+}
+
+/// Version 2 of a contract instrument: version 1 shipped with Level alone, then the
+/// performance controllers were appended with fresh ids (and a meter, to prove the
+/// substrate never routes a controller onto one).
+static SYNTH_PARAMETERS: [ParameterSpecification; 5] = [
+    ParameterSpecification::linear(0, "Level", "%", 0.0, 100.0, 50.0),
+    ParameterSpecification::linear(1, "Pitch Bend", "%", -100.0, 100.0, 0.0),
+    ParameterSpecification::linear(2, "Mod Wheel", "%", 0.0, 100.0, 0.0),
+    ParameterSpecification::linear(3, "Brightness", "%", 0.0, 100.0, 100.0),
+    ParameterSpecification::linear(4, "Pressure Meter", "%", 0.0, 100.0, 0.0).as_meter(),
+];
+
+static SYNTH_MIDI_ASSIGNMENTS: [MidiControllerAssignment; 4] = [
+    MidiControllerAssignment::new(MidiController::PitchBend, 1),
+    MidiControllerAssignment::new(MidiController::ModWheel, 2),
+    MidiControllerAssignment::new(MidiController::ControlChange(74), 3),
+    // Deliberately misdeclared: a meter is read-only, so the substrate must refuse to route onto it.
+    MidiControllerAssignment::new(MidiController::ChannelAftertouch, 4),
+];
+
+static SYNTH_DESCRIPTION: PluginDescription = PluginDescription {
+    name: "Contract Synth",
+    class_identifier: [0x55555555, 0x66666666, 0x77777777, 0x88888888],
+    kind: PluginKind::Instrument,
+    sub_categories: "Instrument|Synth",
+    version: "9.9.9",
+    parameters: &SYNTH_PARAMETERS,
+    sidechain_input: false,
+    note_input: true,
+    tail_seconds: 0.0,
+    midi_controller_assignments: &SYNTH_MIDI_ASSIGNMENTS,
+};
+
+/// Silence with opinions: only its description and controller routes are under test.
+struct ContractSynth;
+
+impl SynergyPlugin for ContractSynth {
+    fn description() -> &'static PluginDescription {
+        &SYNTH_DESCRIPTION
+    }
+    fn new(_sample_rate: f32) -> Self {
+        ContractSynth
+    }
+    fn reset(&mut self) {}
+    fn process(&mut self, block: ProcessBlock<'_>) {
+        block.output_left.fill(0.0);
+        block.output_right.fill(0.0);
     }
 }
 
@@ -101,9 +151,12 @@ fn class_id() -> TUID {
 }
 
 unsafe fn create_component() -> ComPtr<IComponent> {
-    let factory = ComPtr::from_raw(create_factory::<ContractGain>()).expect("factory");
+    create_component_of::<ContractGain>(class_id())
+}
+
+unsafe fn create_component_of<P: SynergyPlugin>(class_identifier: TUID) -> ComPtr<IComponent> {
+    let factory = ComPtr::from_raw(create_factory::<P>()).expect("factory");
     let mut instance: *mut c_void = std::ptr::null_mut();
-    let class_identifier = class_id();
     let interface_identifier = IComponent::IID;
     let result = factory.createInstance(class_identifier.as_ptr(), interface_identifier.as_ptr() as FIDString, &mut instance);
     assert_eq!(result, kResultOk);
@@ -239,5 +292,110 @@ fn process_handles_in_place_buffers_and_an_absent_sidechain() {
         // Zero-frame calls (parameter flushes) are fine too.
         data.numSamples = 0;
         assert_eq!(processor.process(&mut data), kResultOk);
+    }
+}
+
+fn synth_class_id() -> TUID {
+    synergy_substrate::vst3::uid(0x55555555, 0x66666666, 0x77777777, 0x88888888)
+}
+
+/// Asks the controller which parameter a MIDI controller drives, the way a host does.
+unsafe fn midi_assignment(midi_mapping: &ComPtr<IMidiMapping>, bus_index: int32, channel: int16, controller_number: CtrlNumber) -> Option<ParamID> {
+    let mut parameter_identifier: ParamID = ParamID::MAX;
+    match midi_mapping.getMidiControllerAssignment(bus_index, channel, controller_number, &mut parameter_identifier) {
+        result if result == kResultTrue => Some(parameter_identifier),
+        result => {
+            assert_eq!(result, kResultFalse, "unmapped controllers answer kResultFalse");
+            assert_eq!(parameter_identifier, ParamID::MAX, "an unmapped answer must not write the id");
+            None
+        }
+    }
+}
+
+#[test]
+fn midi_controllers_map_to_their_declared_parameters() {
+    use ControllerNumbers_::*;
+    unsafe {
+        let component = create_component_of::<ContractSynth>(synth_class_id());
+        // Hosts ask the edit controller, which is the same object.
+        let controller = component.cast::<IEditController>().expect("IEditController");
+        let midi_mapping = controller.cast::<IMidiMapping>().expect("the controller exposes IMidiMapping");
+        assert_eq!(
+            component.getBusCount(MediaTypes_::kEvent as MediaType, BusDirections_::kInput as BusDirection),
+            1
+        );
+
+        for channel in [0, 9, 15] {
+            assert_eq!(
+                midi_assignment(&midi_mapping, 0, channel, kPitchBend as CtrlNumber),
+                Some(1),
+                "pitch bend, channel {channel}"
+            );
+            assert_eq!(
+                midi_assignment(&midi_mapping, 0, channel, kCtrlModWheel as CtrlNumber),
+                Some(2),
+                "mod wheel, channel {channel}"
+            );
+            assert_eq!(midi_assignment(&midi_mapping, 0, channel, 74), Some(3), "CC 74, channel {channel}");
+        }
+        // Undeclared controllers, a meter target, and a bus that does not exist all stay unmapped.
+        assert_eq!(midi_assignment(&midi_mapping, 0, 0, kCtrlVolume as CtrlNumber), None);
+        assert_eq!(midi_assignment(&midi_mapping, 0, 0, kCtrlExpression as CtrlNumber), None);
+        assert_eq!(
+            midi_assignment(&midi_mapping, 0, 0, kAfterTouch as CtrlNumber),
+            None,
+            "never routes onto a read-only meter"
+        );
+        assert_eq!(midi_assignment(&midi_mapping, 1, 0, kPitchBend as CtrlNumber), None);
+        assert_eq!(midi_assignment(&midi_mapping, -1, 0, kPitchBend as CtrlNumber), None);
+
+        // A mapped controller with nowhere to write the answer is refused, not dereferenced.
+        assert_eq!(
+            midi_mapping.getMidiControllerAssignment(0, 0, kPitchBend as CtrlNumber, std::ptr::null_mut()),
+            kInvalidArgument
+        );
+
+        // The mapped parameters are ordinary automatable knobs the host can see.
+        let mut info: ParameterInfo = std::mem::zeroed();
+        assert_eq!(controller.getParameterInfo(1, &mut info), kResultOk);
+        assert_eq!(info.id, 1);
+        assert_ne!(info.flags & ParameterInfo_::ParameterFlags_::kCanAutomate as int32, 0);
+        assert!((info.defaultNormalizedValue - 0.5).abs() < 1e-12, "pitch bend rests at the centre");
+    }
+}
+
+#[test]
+fn plugins_without_mappings_or_notes_map_nothing() {
+    use ControllerNumbers_::*;
+    unsafe {
+        let component = create_component();
+        let midi_mapping = component.cast::<IMidiMapping>().expect("every substrate class answers IMidiMapping");
+        for controller_number in [kPitchBend, kCtrlModWheel, kAfterTouch, 0, 7, 74, 127] {
+            for bus_index in [0, 1] {
+                assert_eq!(midi_assignment(&midi_mapping, bus_index, 0, controller_number as CtrlNumber), None);
+            }
+        }
+    }
+}
+
+#[test]
+fn a_chunk_saved_before_the_controllers_existed_still_loads() {
+    unsafe {
+        // Version 1 of Contract Synth saved Level alone.
+        let legacy_chunk = synergy_substrate::state::encode_state(&SYNTH_PARAMETERS[..1], &[0.8]);
+        let stream = ComWrapper::new(MemoryStream::default());
+        stream.bytes.borrow_mut().extend_from_slice(&legacy_chunk);
+
+        let component = create_component_of::<ContractSynth>(synth_class_id());
+        let controller = component.cast::<IEditController>().unwrap();
+        controller.setParamNormalized(2, 0.75);
+        assert_eq!(component.setState(stream.to_com_ptr::<IBStream>().unwrap().as_ptr()), kResultOk);
+        assert!((controller.getParamNormalized(0) - 0.8).abs() < 1e-12, "the saved Level survives");
+        assert!((controller.getParamNormalized(1) - 0.5).abs() < 1e-12, "Pitch Bend keeps its centre default");
+        assert!((controller.getParamNormalized(3) - 1.0).abs() < 1e-12, "Brightness keeps its default");
+        assert!(
+            (controller.getParamNormalized(2) - 0.75).abs() < 1e-12,
+            "parameters the old chunk never mentioned are left alone"
+        );
     }
 }

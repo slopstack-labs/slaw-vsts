@@ -1,6 +1,7 @@
 //! The single-component VST3 object: one COM class that is the processor
-//! (IComponent + IAudioProcessor) and its own edit controller (IEditController),
-//! so parameters live in exactly one place and never need syncing between halves.
+//! (IComponent + IAudioProcessor) and its own edit controller (IEditController +
+//! IMidiMapping), so parameters live in exactly one place and never need syncing
+//! between halves.
 //!
 //! Every `unsafe fn` here is a VST3 interface method the host calls with raw
 //! pointers. The rules each one relies on are noted where pointers are touched.
@@ -72,7 +73,7 @@ pub struct PluginComponent<P: SynergyPlugin> {
 }
 
 impl<P: SynergyPlugin> Class for PluginComponent<P> {
-    type Interfaces = (IComponent, IAudioProcessor, IEditController, IProcessContextRequirements);
+    type Interfaces = (IComponent, IAudioProcessor, IEditController, IMidiMapping, IProcessContextRequirements);
 }
 
 impl<P: SynergyPlugin> Default for PluginComponent<P> {
@@ -694,5 +695,25 @@ impl<P: SynergyPlugin> IEditControllerTrait for PluginComponent<P> {
     unsafe fn createView(&self, _name: FIDString) -> *mut IPlugView {
         // Hosts show a generic knob panel; slaw's is excellent and on-brand.
         std::ptr::null_mut()
+    }
+}
+
+impl<P: SynergyPlugin> IMidiMappingTrait for PluginComponent<P> {
+    unsafe fn getMidiControllerAssignment(&self, bus_index: int32, _channel: int16, midi_controller_number: CtrlNumber, identifier: *mut ParamID) -> tresult {
+        // One event bus (index 0) at most; a declared controller routes on every channel.
+        if bus_index != 0 {
+            return kResultFalse;
+        }
+        let Some(parameter_identifier) = P::description().parameter_for_midi_controller(midi_controller_number) else {
+            return kResultFalse;
+        };
+        // SAFETY: `identifier` is null or points at a ParamID the host owns for the duration of the call.
+        match identifier.as_mut() {
+            Some(identifier) => {
+                *identifier = parameter_identifier;
+                kResultTrue
+            }
+            None => kInvalidArgument,
+        }
     }
 }
