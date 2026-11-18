@@ -8,6 +8,7 @@ members = [
     "plugins/executive-override",
     "plugins/escalation-stack",
     "plugins/bottom-line",
+    "plugins/follow-up-cadence",
     "xtask",
 ]
 

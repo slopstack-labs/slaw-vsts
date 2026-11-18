@@ -1,6 +1,7 @@
 //! The single-component VST3 object: one COM class that is the processor
-//! (IComponent + IAudioProcessor) and its own edit controller (IEditController),
-//! so parameters live in exactly one place and never need syncing between halves.
+//! (IComponent + IAudioProcessor) and its own edit controller (IEditController +
+//! IMidiMapping), so parameters live in exactly one place and never need syncing
+//! between halves.
 //!
 //! Every `unsafe fn` here is a VST3 interface method the host calls with raw
 //! pointers. The rules each one relies on are noted where pointers are touched.
@@ -13,6 +14,7 @@ use vst3::Steinberg::Vst::*;
 use vst3::Steinberg::*;
 use vst3::{Class, ComRef};
 
+use crate::automation::{merge_sub_block_meters, retained_point_indices, transport_after_frames, AutomationLanes};
 use crate::state::{decode_state, encode_state};
 use crate::strings::{copy_to_char16, read_char16};
 use crate::{NoteEvent, NoteEventKind, PluginKind, ProcessBlock, SynergyPlugin, TransportSnapshot};
@@ -32,8 +34,12 @@ struct ProcessingState<P: SynergyPlugin> {
     sidechain_left: Vec<f32>,
     sidechain_right: Vec<f32>,
     plain_parameters: Vec<f32>,
+    /// Meters for the whole host block, combined across sub-blocks.
     meters: Vec<Option<f32>>,
+    /// Meters one plugin call reported, before they are folded into `meters`.
+    sub_block_meters: Vec<Option<f32>>,
     events: Vec<NoteEvent>,
+    automation_lanes: AutomationLanes,
 }
 
 impl<P: SynergyPlugin> ProcessingState<P> {
@@ -48,7 +54,9 @@ impl<P: SynergyPlugin> ProcessingState<P> {
             sidechain_right: vec![0.0; maximum_block],
             plain_parameters: vec![0.0; parameter_count],
             meters: vec![None; parameter_count],
+            sub_block_meters: vec![None; parameter_count],
             events: Vec::with_capacity(1024),
+            automation_lanes: AutomationLanes::new(parameter_count),
         }
     }
 
@@ -72,7 +80,7 @@ pub struct PluginComponent<P: SynergyPlugin> {
 }
 
 impl<P: SynergyPlugin> Class for PluginComponent<P> {
-    type Interfaces = (IComponent, IAudioProcessor, IEditController, IProcessContextRequirements);
+    type Interfaces = (IComponent, IAudioProcessor, IEditController, IMidiMapping, IProcessContextRequirements);
 }
 
 impl<P: SynergyPlugin> Default for PluginComponent<P> {
@@ -344,26 +352,17 @@ impl<P: SynergyPlugin> IAudioProcessorTrait for PluginComponent<P> {
         };
         let description = P::description();
 
-        // Automation in: apply the last point of each queue (blocks are short; slaw sends 64-frame chunks).
-        if let Some(parameter_changes) = ComRef::from_raw(data.inputParameterChanges) {
-            for queue_index in 0..parameter_changes.getParameterCount() {
-                let Some(value_queue) = ComRef::from_raw(parameter_changes.getParameterData(queue_index)) else {
-                    continue;
-                };
-                let point_count = value_queue.getPointCount();
-                let Some(parameter_index) = description.parameter_index(value_queue.getParameterId()) else {
-                    continue;
-                };
-                if point_count <= 0 || description.parameters[parameter_index].read_only {
-                    continue;
-                }
-                let mut sample_offset: int32 = 0;
-                let mut normalized_value: ParamValue = 0.0;
-                if value_queue.getPoint(point_count - 1, &mut sample_offset, &mut normalized_value) == kResultOk {
-                    self.store_normalized_value(parameter_index, normalized_value);
-                }
-            }
-        }
+        // Never block the audio thread: if setupProcessing holds the lock, this block gets silence (below).
+        let mut processing_guard = self.processing.try_lock().ok();
+
+        // Automation in: each queue's points are kept (in memory preallocated by ProcessingState::new)
+        // so the block below is rendered in short sub-blocks that follow the ramps, sample-accurate-ish
+        // even in hosts with 2048-frame blocks. The stored normalized value lands on each queue's last
+        // point, as the controller reports it, including for parameter flushes and contended blocks.
+        self.ingest_parameter_changes(
+            data.inputParameterChanges,
+            processing_guard.as_deref_mut().map(|processing| &mut processing.automation_lanes),
+        );
 
         let frame_count = usize::try_from(data.numSamples).unwrap_or(0);
         if frame_count == 0 || data.numOutputs < 1 || data.outputs.is_null() {
@@ -383,8 +382,7 @@ impl<P: SynergyPlugin> IAudioProcessorTrait for PluginComponent<P> {
         }
         output_bus.silenceFlags = 0;
 
-        // Never block the audio thread: if setupProcessing holds the lock, emit silence this block.
-        let Ok(mut processing) = self.processing.try_lock() else {
+        let Some(mut processing) = processing_guard else {
             for channel_index in 0..output_channel_count {
                 let channel_pointer = *output_channels.add(channel_index);
                 if !channel_pointer.is_null() {
@@ -447,7 +445,7 @@ impl<P: SynergyPlugin> IAudioProcessorTrait for PluginComponent<P> {
             }
         }
 
-        let transport = Self::read_transport(data.processContext);
+        let block_transport = Self::read_transport(data.processContext);
         for (parameter_index, parameter) in description.parameters.iter().enumerate() {
             processing.plain_parameters[parameter_index] = parameter.plain_from_normalized(self.normalized_value(parameter_index)) as f32;
         }
@@ -471,38 +469,75 @@ impl<P: SynergyPlugin> IAudioProcessorTrait for PluginComponent<P> {
             std::slice::from_raw_parts_mut(output_right_pointer, frame_count)
         };
         let stereo_output = !output_right.is_empty();
-        if !stereo_output {
-            // A mono output: render the right channel into the sidechain-right scratch and discard it.
-            processing.plugin.process(ProcessBlock {
-                sample_rate: processing.sample_rate,
-                input_left: &processing.input_left[..frame_count],
-                input_right: &processing.input_right[..frame_count],
-                sidechain: sidechain_present.then_some((&processing.sidechain_left[..frame_count], &processing.sidechain_left[..frame_count])),
-                output_left,
-                output_right: &mut processing.sidechain_right[..frame_count],
-                parameters: &processing.plain_parameters,
-                meters: &mut processing.meters,
-                events: &processing.events,
-                transport,
+
+        let ProcessingState {
+            plugin,
+            sample_rate,
+            input_left,
+            input_right,
+            sidechain_left,
+            sidechain_right,
+            plain_parameters,
+            meters,
+            sub_block_meters,
+            events,
+            automation_lanes,
+        } = processing;
+        let sample_rate = *sample_rate;
+        // Without automation the plugin gets the whole block in one call, exactly as before. With it,
+        // the block is split into sub-blocks of at most AUTOMATION_SUB_BLOCK_FRAMES, each rendered with
+        // the parameter values at its first frame, its own note events and its own transport position.
+        let automation_moving = automation_lanes.any_lane_moving();
+        let mut sub_block_start = 0;
+        let mut first_sub_block_event = 0;
+        while sub_block_start < frame_count {
+            let sub_block_end = if automation_moving {
+                automation_lanes.write_plain_values_at(sub_block_start, description.parameters, plain_parameters);
+                automation_lanes.sub_block_end(sub_block_start, frame_count)
+            } else {
+                frame_count
+            };
+            let sub_block = sub_block_start..sub_block_end;
+            // Events are sorted and each belongs to exactly one sub-block: rebase its offset in place.
+            let mut next_sub_block_event = first_sub_block_event;
+            while next_sub_block_event < events.len() && events[next_sub_block_event].sample_offset < sub_block_end {
+                events[next_sub_block_event].sample_offset -= sub_block_start;
+                next_sub_block_event += 1;
+            }
+            let (output_right_sub_block, sidechain_sub_block): (&mut [f32], _) = if stereo_output {
+                (
+                    &mut output_right[sub_block.clone()],
+                    sidechain_present.then_some((&sidechain_left[sub_block.clone()], &sidechain_right[sub_block.clone()])),
+                )
+            } else {
+                // A mono output: render the right channel into the sidechain-right scratch and discard it.
+                (
+                    &mut sidechain_right[sub_block.clone()],
+                    sidechain_present.then_some((&sidechain_left[sub_block.clone()], &sidechain_left[sub_block.clone()])),
+                )
+            };
+            sub_block_meters.fill(None);
+            plugin.process(ProcessBlock {
+                sample_rate,
+                input_left: &input_left[sub_block.clone()],
+                input_right: &input_right[sub_block.clone()],
+                sidechain: sidechain_sub_block,
+                output_left: &mut output_left[sub_block],
+                output_right: output_right_sub_block,
+                parameters: plain_parameters,
+                meters: sub_block_meters,
+                events: &events[first_sub_block_event..next_sub_block_event],
+                transport: transport_after_frames(&block_transport, sub_block_start, sample_rate),
             });
-        } else {
-            processing.plugin.process(ProcessBlock {
-                sample_rate: processing.sample_rate,
-                input_left: &processing.input_left[..frame_count],
-                input_right: &processing.input_right[..frame_count],
-                sidechain: sidechain_present.then_some((&processing.sidechain_left[..frame_count], &processing.sidechain_right[..frame_count])),
-                output_left,
-                output_right,
-                parameters: &processing.plain_parameters,
-                meters: &mut processing.meters,
-                events: &processing.events,
-                transport,
-            });
+            // One reading per meter per host block: the largest magnitude across sub-blocks wins.
+            merge_sub_block_meters(meters, sub_block_meters);
+            first_sub_block_event = next_sub_block_event;
+            sub_block_start = sub_block_end;
         }
 
         // Meters out: store for getParamNormalized and report to the host if it listens.
         let output_parameter_changes = ComRef::from_raw(data.outputParameterChanges);
-        for (parameter_index, meter_value) in processing.meters.iter().enumerate() {
+        for (parameter_index, meter_value) in meters.iter().enumerate() {
             let Some(meter_plain) = meter_value else {
                 continue;
             };
@@ -554,6 +589,50 @@ impl<P: SynergyPlugin> PluginComponent<P> {
             right[..frame_count].copy_from_slice(std::slice::from_raw_parts(right_pointer, frame_count));
         }
         true
+    }
+
+    /// Reads the host's automation queues. Every parameter's stored normalized value moves to its
+    /// queue's last point. When `automation_lanes` is given (the processing lock is ours), the points
+    /// themselves are kept too, ramping from the value stored before this block, so the block can
+    /// follow them. Allocation-free: the lanes were sized in ProcessingState::new.
+    ///
+    /// # Safety
+    /// `parameter_changes` must be null or the host's IParameterChanges for the current call.
+    unsafe fn ingest_parameter_changes(&self, parameter_changes: *mut IParameterChanges, mut automation_lanes: Option<&mut AutomationLanes>) {
+        let description = P::description();
+        if let Some(automation_lanes) = &mut automation_lanes {
+            automation_lanes.clear();
+        }
+        let Some(parameter_changes) = ComRef::from_raw(parameter_changes) else {
+            return;
+        };
+        for queue_index in 0..parameter_changes.getParameterCount() {
+            let Some(value_queue) = ComRef::from_raw(parameter_changes.getParameterData(queue_index)) else {
+                continue;
+            };
+            let point_count = value_queue.getPointCount();
+            let Some(parameter_index) = description.parameter_index(value_queue.getParameterId()) else {
+                continue;
+            };
+            if point_count <= 0 || description.parameters[parameter_index].read_only {
+                continue;
+            }
+            if let Some(automation_lanes) = &mut automation_lanes {
+                automation_lanes.begin_lane(parameter_index, self.normalized_value(parameter_index));
+                for point_index in retained_point_indices(point_count as usize) {
+                    let mut sample_offset: int32 = 0;
+                    let mut normalized_value: ParamValue = 0.0;
+                    if value_queue.getPoint(point_index as int32, &mut sample_offset, &mut normalized_value) == kResultOk && normalized_value.is_finite() {
+                        automation_lanes.record_point(parameter_index, usize::try_from(sample_offset).unwrap_or(0), normalized_value.clamp(0.0, 1.0));
+                    }
+                }
+            }
+            let mut sample_offset: int32 = 0;
+            let mut normalized_value: ParamValue = 0.0;
+            if value_queue.getPoint(point_count - 1, &mut sample_offset, &mut normalized_value) == kResultOk {
+                self.store_normalized_value(parameter_index, normalized_value);
+            }
+        }
     }
 
     /// # Safety
@@ -694,5 +773,25 @@ impl<P: SynergyPlugin> IEditControllerTrait for PluginComponent<P> {
     unsafe fn createView(&self, _name: FIDString) -> *mut IPlugView {
         // Hosts show a generic knob panel; slaw's is excellent and on-brand.
         std::ptr::null_mut()
+    }
+}
+
+impl<P: SynergyPlugin> IMidiMappingTrait for PluginComponent<P> {
+    unsafe fn getMidiControllerAssignment(&self, bus_index: int32, _channel: int16, midi_controller_number: CtrlNumber, identifier: *mut ParamID) -> tresult {
+        // One event bus (index 0) at most; a declared controller routes on every channel.
+        if bus_index != 0 {
+            return kResultFalse;
+        }
+        let Some(parameter_identifier) = P::description().parameter_for_midi_controller(midi_controller_number) else {
+            return kResultFalse;
+        };
+        // SAFETY: `identifier` is null or points at a ParamID the host owns for the duration of the call.
+        match identifier.as_mut() {
+            Some(identifier) => {
+                *identifier = parameter_identifier;
+                kResultTrue
+            }
+            None => kInvalidArgument,
+        }
     }
 }

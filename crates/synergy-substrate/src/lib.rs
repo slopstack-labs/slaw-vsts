@@ -4,19 +4,24 @@
 //! describes itself (name, class id, buses, parameters) and implements
 //! [`SynergyPlugin`] for its DSP; the substrate does the rest: the factory, a
 //! single-component processor + edit controller, bus negotiation, parameter
-//! automation in and meters out, note events, host tempo and position, and a
+//! automation in (split into short sub-blocks so ramps arrive sample-accurate-ish,
+//! see [`automation`]) and meters out, note events, MIDI controller → parameter
+//! mapping (pitch bend, mod wheel, aftertouch, CCs), host tempo and position, and a
 //! state chunk so hosts can save and restore every knob.
 //!
 //! Plugins never see a raw pointer. All `unsafe` lives in [`component`] and
 //! [`factory`], next to the comments that justify it.
 
+pub mod automation;
 pub mod component;
 pub mod dsp;
 pub mod factory;
+pub mod midi;
 pub mod parameters;
 pub mod state;
 mod strings;
 
+pub use midi::{MidiController, MidiControllerAssignment};
 pub use parameters::{ParameterSpecification, ParameterTaper};
 pub use vst3;
 
@@ -52,6 +57,9 @@ pub struct PluginDescription {
     pub note_input: bool,
     /// How long the plugin keeps ringing after its input stops, in seconds.
     pub tail_seconds: f64,
+    /// MIDI controllers the host should send as changes to these parameters (pitch bend,
+    /// mod wheel, …). Only honoured on plugins with a note input; empty for everyone else.
+    pub midi_controller_assignments: &'static [MidiControllerAssignment],
 }
 
 impl PluginDescription {
@@ -61,6 +69,22 @@ impl PluginDescription {
 
     pub fn has_note_input(&self) -> bool {
         self.kind == PluginKind::Instrument || self.note_input
+    }
+
+    /// The parameter id a VST3 controller number drives, if the plugin declared one.
+    /// Assignments without a note input, or aimed at a missing or read-only parameter, never route.
+    pub fn parameter_for_midi_controller(&self, vst3_controller_number: i16) -> Option<u32> {
+        if !self.has_note_input() {
+            return None;
+        }
+        self.midi_controller_assignments
+            .iter()
+            .find(|assignment| assignment.controller.vst3_controller_number() == vst3_controller_number)
+            .map(|assignment| assignment.parameter_identifier)
+            .filter(|parameter_identifier| {
+                self.parameter_index(*parameter_identifier)
+                    .is_some_and(|parameter_index| !self.parameters[parameter_index].read_only)
+            })
     }
 }
 
@@ -91,6 +115,11 @@ pub struct TransportSnapshot {
 }
 
 /// One block of work handed to [`SynergyPlugin::process`].
+///
+/// A host block without automation arrives as one `ProcessBlock`. While automation moves, the
+/// substrate hands it over as consecutive sub-blocks of at most
+/// [`automation::AUTOMATION_SUB_BLOCK_FRAMES`] frames, each with the parameter values at its first
+/// frame, its own events (offsets relative to it) and its own transport, so plugins need not care.
 pub struct ProcessBlock<'a> {
     pub sample_rate: f32,
     /// Main input (effects). Silence for instruments.
@@ -102,7 +131,8 @@ pub struct ProcessBlock<'a> {
     pub output_right: &'a mut [f32],
     /// Plain parameter values, indexed like [`PluginDescription::parameters`].
     pub parameters: &'a [f32],
-    /// Where read-only parameters (meters) report their plain value, same indexing.
+    /// Where read-only parameters (meters) report their plain value, same indexing. Across the
+    /// sub-blocks of one host block, the reading with the largest magnitude is what the host sees.
     pub meters: &'a mut [Option<f32>],
     pub events: &'a [NoteEvent],
     pub transport: TransportSnapshot,
@@ -177,4 +207,50 @@ macro_rules! export_synergy_plugin {
             true
         }
     };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    static PARAMETERS: [ParameterSpecification; 2] = [
+        ParameterSpecification::linear(10, "Pitch Bend", "%", -100.0, 100.0, 0.0),
+        ParameterSpecification::linear(11, "Meter", "dB", 0.0, 1.0, 0.0).as_meter(),
+    ];
+
+    static ASSIGNMENTS: [MidiControllerAssignment; 3] = [
+        MidiControllerAssignment::new(MidiController::PitchBend, 10),
+        MidiControllerAssignment::new(MidiController::ModWheel, 11),
+        MidiControllerAssignment::new(MidiController::ChannelAftertouch, 99),
+    ];
+
+    const fn description(kind: PluginKind, note_input: bool) -> PluginDescription {
+        PluginDescription {
+            name: "Routing",
+            class_identifier: [0; 4],
+            kind,
+            sub_categories: "Fx",
+            version: "0",
+            parameters: &PARAMETERS,
+            sidechain_input: false,
+            note_input,
+            tail_seconds: 0.0,
+            midi_controller_assignments: &ASSIGNMENTS,
+        }
+    }
+
+    #[test]
+    fn controllers_route_only_to_writable_parameters_on_plugins_that_take_notes() {
+        let pitch_bend = MidiController::PitchBend.vst3_controller_number();
+        let mod_wheel = MidiController::ModWheel.vst3_controller_number();
+        let aftertouch = MidiController::ChannelAftertouch.vst3_controller_number();
+        for listening in [description(PluginKind::Instrument, false), description(PluginKind::Effect, true)] {
+            assert_eq!(listening.parameter_for_midi_controller(pitch_bend), Some(10));
+            assert_eq!(listening.parameter_for_midi_controller(mod_wheel), None, "meters are read-only");
+            assert_eq!(listening.parameter_for_midi_controller(aftertouch), None, "id 99 does not exist");
+            assert_eq!(listening.parameter_for_midi_controller(7), None);
+        }
+        let deaf_effect = description(PluginKind::Effect, false);
+        assert_eq!(deaf_effect.parameter_for_midi_controller(pitch_bend), None, "no note input, no controllers");
+    }
 }

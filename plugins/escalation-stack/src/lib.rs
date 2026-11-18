@@ -53,6 +53,7 @@ static DESCRIPTION: PluginDescription = PluginDescription {
     sidechain_input: false,
     note_input: false,
     tail_seconds: 0.05,
+    midi_controller_assignments: &[],
 };
 
 // ── Voicings and cabinets ───────────────────────────────────────────────────

@@ -30,6 +30,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "follow-up-cadence"
+version = "0.1.0"
+dependencies = [
+ "synergy-substrate",
+]
+
+[[package]]
 name = "headcount"
 version = "0.1.0"
 dependencies = [
@@ -54,6 +61,7 @@ dependencies = [
 name = "synergy-substrate"
 version = "0.1.0"
 dependencies = [
+ "executive-override",
  "vst3",
 ]
 

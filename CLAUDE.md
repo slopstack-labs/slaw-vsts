@@ -25,9 +25,11 @@ Drive it over stdio JSON-RPC: `list_plugins` (vendor "slopstack labs", correct i
 
 | Path | What |
 |------|------|
-| `crates/synergy-substrate/src/component.rs` | the single COM object: IComponent + IAudioProcessor + IEditController + IProcessContextRequirements. All host pointers are handled here |
+| `crates/synergy-substrate/src/component.rs` | the single COM object: IComponent + IAudioProcessor + IEditController + IMidiMapping + IProcessContextRequirements. All host pointers are handled here |
 | `crates/synergy-substrate/src/factory.rs` | IPluginFactory 1/2/3 (vendor, sub-categories) |
 | `crates/synergy-substrate/src/{parameters,state,dsp}.rs` | parameter tapers/formatting, the state chunk, shared DSP (ZDF filter, PolyBLEP, dB helpers, RBJ biquads, the 4x oversampler) |
+| `crates/synergy-substrate/src/midi.rs` | `MidiController` / `MidiControllerAssignment`: the plugin-facing names for VST3 controller numbers (pitch bend, mod wheel, aftertouch, CCs) |
+| `crates/synergy-substrate/src/automation.rs` | sample-accurate-ish automation: splits automated host blocks into ≤32-frame sub-blocks with interpolated parameters, rebased events, advanced transport and combined meters (largest magnitude wins). Plain Rust, no host pointers |
 | `crates/synergy-substrate/tests/com_contract.rs` | drives a plugin through the real COM interfaces like a host |
 | `plugins/<crate>/src/lib.rs` | one `SynergyPlugin` + `export_synergy_plugin!` + its DSP tests |
 | `xtask/` | `cargo xtask bundle` |
@@ -38,6 +40,7 @@ Drive it over stdio JSON-RPC: `list_plugins` (vendor "slopstack labs", correct i
 |---|---|
 | a plugin's **parameters** (`PARAMETERS`) | README portfolio table (ids, titles, units); the plugin's tests; never reuse or renumber an id (projects and automation store them) |
 | a plugin's **name, kind or sub-categories** | `PluginDescription`; `bundle-name` in its `Cargo.toml` (`[package.metadata.slaw-vsts]`); README table; `docs/index.html` card. slaw treats sub-categories containing `Instrument` as instruments and shows the second part as the role |
+| a plugin's **MIDI controller mappings** (`midi_controller_assignments`, or `MidiController` in `midi.rs`) | README "MIDI controllers" table; the plugin's routing test; `com_contract.rs` IMidiMapping assertions. Map only onto writable parameters that have their own id |
 | **buses** (`sidechain_input`, `note_input`, bus names/flags in `component.rs`) | README "sidechain contract" table (slaw matches the `Sidechain` aux bus by it); `com_contract.rs` bus assertions |
 | a **new plugin** | workspace `members`; class id from a fresh UUID; README table + track record; `docs/index.html` card; CI picks it up via `xtask` automatically |
 | the **state chunk** format (`state.rs`) | bump `STATE_FORMAT_VERSION` and keep reading the old version, or saved projects lose their settings |

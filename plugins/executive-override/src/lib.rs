@@ -60,6 +60,7 @@ static DESCRIPTION: PluginDescription = PluginDescription {
     sidechain_input: true,
     note_input: true,
     tail_seconds: 0.0,
+    midi_controller_assignments: &[],
 };
 
 /// Tempo used when the host does not say (or is stopped and says nothing).
